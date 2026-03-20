@@ -95,6 +95,7 @@ class HP1000Assembler:
         }
         self.extra = {}
         self.symbols = {}
+        self.define = {}
         self.lc = 0  # Location Counter
 
    
@@ -107,9 +108,9 @@ class HP1000Assembler:
         
         label = None
         # Labels in HP1000 usually end with a comma
-        if ',' in line.split()[0]:
+        if ':' in line.split()[0]:
             parts = line.split(maxsplit=1)
-            label = parts[0].replace(',', '')
+            label = parts[0].replace(':', '')
             line = parts[1] if len(parts) > 1 else ""
             
         parts = line.split()
@@ -128,6 +129,7 @@ class HP1000Assembler:
             if mnemonic == 'ORG':
                 _, _, op = self.parse_line(line)
                 self.lc = int(op, 8)
+
             elif mnemonic:
                 self.lc += 1
 
@@ -157,62 +159,65 @@ class HP1000Assembler:
                 instruction = self.mri[mnemonic]
                 # Check for indirect bit
                 
-                if (',I') in operand:
+                if (',I') in operand: #set I bit
                     instruction |= 0b1000000000000000
                     operand = operand[:-2]
                
-                if (',C') in operand: 
+                if (',C') in operand: #set c bit
                     instruction |= 0b10000000000
                     operand = operand[:-2]
                
-                if (',I,C') in operand:
+                if (',I,C') in operand: #set both (better way to do this is to use shifts, TODO: use shifts)
                     instruction |= 0b1000000000000000 | 0b10000000000
                     operand = operand[:-4]
               
-                if "*" in operand:
-                    bin_operand = int(operand.split('*',1)[-1],8)
-                    #print(bin_operand)
-                    bin_self_lc = self.lc
-                    instruction |=  bin_operand + bin_self_lc
+                if "*" in operand: #check if we're using relative mode. 
+                    bin_operand = int(operand.split('*',1)[-1],8) #if relative, split, get offset
+                    bin_self_lc = self.lc #temporary location counter
+                    instruction |=  bin_operand + bin_self_lc #add the offset to the current location. 
               
-                if operand.isdigit():
-                    operand_oct = int(operand,8)
-                    if operand_oct < 0o1001: 
-                        instruction |= operand_oct
+                if operand.isdigit(): #if we're defining a number after the instruction
+                    operand_oct = int(operand,8) # force it to be octal
+                    if operand_oct < 0o1001: #limit it,
+                        instruction |= operand_oct #append it
                     else:
-                        instruction |= 0o1000
+                        instruction |= 0o1000 #if out of bounds, restrain it. 
+                
+                if operand.isalpha():
+                    operand_oct =self.symbols[operand]
+                    instruction |= operand_oct
 
             if mnemonic in self.idw or mnemonic in self.eamr:                 
                 try:
-                    instruction = self.idw[mnemonic] 
+                    instruction = self.idw[mnemonic]  #if instruction is in idw, take the opcode from there
                 except:
-                    instruction = self.eamr[mnemonic]
-                double_loc_inst(self,machine_code,instruction,operand,line)    
+                    instruction = self.eamr[mnemonic] #if the instruction is in eamr, opcode lives there. 
+                double_loc_inst(self,machine_code,instruction,operand,line) #double loc inst is for instructions that take more than one word of memory. 
             
-            if mnemonic in self.isw: 
+            if mnemonic in self.isw: #isw instructions don't have operands, so return the octal from the dict. 
                 instruction = self.isw[mnemonic]
 
-            if mnemonic in self.earr: 
+            if mnemonic in self.earr: #if earr, append the operand to the last 4 bits. 
                 instruction = self.earr[mnemonic]
                 instruction |= (0o17 & int(operand,8))
 
-            if mnemonic in self.non_mri:
+            if mnemonic in self.non_mri: #if combinational "," split and combine opcodes. This right now will allow illegal combinations and may cause unintended results. 
                 instruction = self.non_mri[mnemonic]
                 try:
                     if "," in operand:
                         additional_operand = operand.split(",")[1]
                         instruction |= self.non_mri[additional_operand]
                 except: 
-                        instruction = self.non_mri[mnemonic]
+                        instruction = self.non_mri[mnemonic] # if not combinational, just use the mnemonic. 
 
-            if mnemonic in self.io: 
-                instruction = self.io[mnemonic]
+            if mnemonic in self.io: #if the instruction is in the IO section. 
+                instruction = self.io[mnemonic] # grab instruction
                 try:
-                    operand_oct_io = int(operand,8)
-                    if operand.isdigit() & operand_oct_io < 0o100: 
+                    operand_oct_io = int(operand,8) #add operand 
+                    if operand.isdigit() & operand_oct_io < 0o100: #check boundary condition 
                         instruction |= operand_oct_io
                 except: 
-                    print("Error: IO instruction has no operand")
+                    print("Error: IO instruction has no operand or referenced out of bounds IO address") #print an error if there is one. 
            
 
             if mnemonic == 'DEC':
@@ -228,35 +233,30 @@ class HP1000Assembler:
 
 # --- Testing the Label Resolution ---
 asm_source = [
-"ORG 400",
-"CLA ,INA", 
-"OTA 01",
-"CLB",
-"INB ,SZB",
-"JMP 103",
-"RAL", 
-"RSS ,SSA ",
-"JMP 101",
-"OTA 01", 
-"CLB",
-"INB ,SZB",
-"JMP 112",
-"RAR",
-"RSS ,SLA",
-"JMP 110",
-"JMP 101",
-"DLD 1",
-"JMP 101",
-"ASR 1",
-"ADX 67677"
+
 ]
+parsed_source = []
+
+argument_len = len(sys.argv)
+input_file_name = sys.argv[1]
+output_file_name = sys.argv[2]
+#output_file_bin = sys.argv[3]
+print(input_file_name)
+print(output_file_name)
+
+with open(input_file_name, "r") as input_file, open(output_file_name, "w") as output_file: 
+    asm_source = input_file.readlines()
+    print(asm_source)
+    assembeler = HP1000Assembler()
+    assembeler.pass_one(asm_source)
+    results = assembeler.pass_two(asm_source)
+    print(results)
+    output_file.writelines(f"{'LOC':<6} | {'OCTAL':<6} | {'SOURCE'}" + "\n")
+    output_file.writelines("-" * 45 + "\n")
+    for loc, code, src in results:
+        output_file.writelines(f"{oct(loc)[2:]:>6} | {oct(code)[2:].zfill(6):>6} | {src}\n")
+    
+input_file.close()
+output_file.close()
 
 
-assembeler = HP1000Assembler()
-assembeler.pass_one(asm_source)
-results = assembeler.pass_two(asm_source)
-
-print(f"{'LOC':<8} | {'BINARY (OCT)':<12} | {'SOURCE'}")
-print("-" * 45)
-for loc, code, src in results:
-    print(f"{oct(loc)[2:]:>6} | {oct(code)[2:].zfill(6):>6} | {src}")
