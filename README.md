@@ -13,5 +13,5 @@ Variables are defined with OCT and DEC for octal and decimal.
 
 Origins are defined with an ORG
 
-comments can be made with a semicolon. 
+Comments can be made with a semicolon. 
 
