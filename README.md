@@ -15,3 +15,5 @@ Variables are defined with OCT and DEC for octal and decimal.
 Origins are defined with an ORG
 
 Comments can be made with a semicolon. 
+
+Currently, the assembler only outputs a listing file with assembled octal. I am not fully sure how loading into the machine via serial will work, so a major TODO is to add in a binary output and make that listing an option. 
