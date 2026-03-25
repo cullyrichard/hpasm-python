@@ -1,4 +1,5 @@
 USAGE: python3 hpasm.py [input_file] [output_file] 
+
 Released under the MIT license 
 
 This is the simplest possible assembler I could come up with for the HP21xx platform. There are most certainly bugs in the code and performance improvements to be made. This code will be updated with time. 
