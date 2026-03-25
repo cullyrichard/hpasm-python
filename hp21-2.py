@@ -152,8 +152,8 @@ class HP1000Assembler:
                 # If addr is on page 0 (0-1023), bit 11 is 0.
                 page_bit = 0o004000 if addr > 0o1777 else 0
                 instruction |= (page_bit | (addr & 0o3777))
-            else:
-                    print(f"Error: Undefined label '{operand}' at line {line}")
+            #else: #TODO: DEBUG THIS, THERE IS SOME ISSUE THAT CAUSES IT TO PRINT EVERY VARIABLE
+                    #print(f"Error: Undefined label '{operand}' at line {line}")
 
             if mnemonic in self.mri:
                 instruction = self.mri[mnemonic]
