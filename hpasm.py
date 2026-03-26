@@ -22,16 +22,6 @@
 
 import sys
 
-def double_loc_inst(self,machine_code,instruction,operand,line):
-    machine_code.append((self.lc, instruction, line.strip()))
-              
-    if operand is None:
-        print ("No Memory Address Defined In Extended Arithmetic Memory Reference Instruction") 
-        return 
-              
-    self.lc += 1
-    machine_code.append((self.lc,int(operand,8)," "))
-
 class HP1000Assembler:
     def __init__(self):
         self.symbol_table = {}
@@ -111,7 +101,7 @@ class HP1000Assembler:
             "SBT": 0o105764, "XMA": 0o101722, "XMM": 0o105720,
             "XMB": 0o105722, "FIX": 0o105120, "FLT": 0o105120,
 
-
+        #TODO: add floating point instructions 
         }
         self.bit = {
         }
@@ -120,7 +110,16 @@ class HP1000Assembler:
         self.define = {}
         self.lc = 0  # Location Counter
 
-   
+    def double_word_inst(self,machine_code,instruction,operand,line):
+        machine_code.append((self.lc, instruction, line.strip()))
+              
+        if operand is None:
+            print ("No Memory Address Defined In Extended Arithmetic Memory Reference Instruction") 
+            return 
+        if operand > 0o177777:
+            print("operand exceeds 177777 at line {line}")
+        self.lc += 1
+        machine_code.append((self.lc,int(operand,8)," "))
 
 
     def parse_line(self, line):
@@ -174,26 +173,25 @@ class HP1000Assembler:
                 # If addr is on page 0 (0-1023), bit 11 is 0.
                 page_bit = 0o004000 if addr > 0o1777 else 0
                 instruction |= (page_bit | (addr & 0o3777))
-            #else: #TODO: DEBUG THIS, THERE IS SOME ISSUE THAT CAUSES IT TO PRINT EVERY VARIABLE
-                    #print(f"Error: Undefined label '{operand}' at line {line}")
-
+            #else:
+                   #print(f"Error: Undefined label '{operand}' at line {line}")
             if mnemonic in self.mri:
                 instruction = self.mri[mnemonic]
                 # Check for indirect bit
                 
                 if (',I') in operand: #set I bit
-                    instruction |= 0b1000000000000000
+                    instruction |= 0b1<<15
                     operand = operand[:-2]
                
                 if (',C') in operand: #set c bit
-                    instruction |= 0b10000000000
+                    instruction |= 0b1<<10
                     operand = operand[:-2]
                
                 if (',I,C') in operand: #set both (better way to do this is to use shifts, TODO: use shifts)
-                    instruction |= 0b1000000000000000 | 0b10000000000
+                    instruction |= (0b1<<15 | 0b1<<10)
                     operand = operand[:-4]
               
-                if "*" in operand: #check if we're using relative mode. 
+                if "*" in operand: #check if we're using relative jumps. 
                     bin_operand = int(operand.split('*',1)[-1],8) #if relative, split, get offset
                     bin_self_lc = self.lc #temporary location counter
                     instruction |=  bin_operand + bin_self_lc #add the offset to the current location. 
@@ -203,10 +201,14 @@ class HP1000Assembler:
                     if operand_oct < 0o1001: #limit it,
                         instruction |= operand_oct #append it
                     else:
-                        instruction |= 0o1000 #if out of bounds, restrain it. 
+                        print("Memory Reference Instruction Operand is out of range at line {line}")
+                        return
                 
                 if operand.isalpha():
-                    operand_oct =self.symbols[operand]
+                    operand_oct = self.symbols[operand]
+                    if operand_oct > 0o1000:
+                        print("Memory Reference Instruction Operand is out of range at line {line}")
+                        return 
                     instruction |= operand_oct
 
             if mnemonic in self.idw or mnemonic in self.eamr:                 
@@ -214,16 +216,18 @@ class HP1000Assembler:
                     instruction = self.idw[mnemonic]  #if instruction is in idw, take the opcode from there
                 except:
                     instruction = self.eamr[mnemonic] #if the instruction is in eamr, opcode lives there. 
-                double_loc_inst(self,machine_code,instruction,operand,line) #double loc inst is for instructions that take more than one word of memory. 
+                self.double_word_inst(self,machine_code,instruction,operand,line) #double loc inst is for instructions that take more than one word of memory. 
             
             if mnemonic in self.isw: #isw instructions don't have operands, so return the octal from the dict. 
                 instruction = self.isw[mnemonic]
 
             if mnemonic in self.earr: #if earr, append the operand to the last 4 bits. 
                 instruction = self.earr[mnemonic]
+                if operand > 0o17:
+                    print("Shift operand out of range at line {line}")
                 instruction |= (0o17 & int(operand,8))
 
-            if mnemonic in self.non_mri: #if combinational "," split and combine opcodes. This right now will allow illegal combinations and may cause unintended results. 
+            if mnemonic in self.non_mri: #if combinational "," split and combine opcodes. This will allow illegal combinations and may cause unintended results. 
                 instruction = self.non_mri[mnemonic]
                 try:
                     if "," in operand:
@@ -236,16 +240,33 @@ class HP1000Assembler:
                 instruction = self.io[mnemonic] # grab instruction
                 try:
                     operand_oct_io = int(operand,8) #add operand 
-                    if operand.isdigit() & operand_oct_io < 0o100: #check boundary condition 
+                    if operand.isdigit() and (operand_oct_io < 0o100): #check boundary condition 
                         instruction |= operand_oct_io
+                    else: 
+                        print("IO instruction referenced out of bounds IO address")
+                        return
                 except: 
-                    print("Error: IO instruction has no operand or referenced out of bounds IO address") #print an error if there is one. 
+                    print("Error: IO instruction has no operand") #print an error if there is one. 
            
 
             if mnemonic == 'DEC':
                 instruction = int(operand) & 0xFFFF
             if mnemonic == 'OCT':
                 instruction = int(operand, 8) & 0xFFFF
+            
+            #f mnemonic == 'STR':
+                #for char in operand:
+                    
+
+            if mnemonic == 'DEF':
+                operand.strip("'")
+                try:
+                    instruction = int(str(ord(operand[0])))<<8 | int(str(ord(operand[1])))
+                except: 
+                    instruction = int(str(ord(operand[0])))
+         
+            if (mnemonic == 'END') | (mnemonic == 'NAM'):
+                continue #the program will exit at the end so this is ok. 
             
             if mnemonic not in self.eamr and mnemonic not in self.idw:
                 machine_code.append((self.lc, instruction, line.strip()))
@@ -263,16 +284,16 @@ argument_len = len(sys.argv)
 input_file_name = sys.argv[1]
 output_file_name = sys.argv[2]
 #output_file_bin = sys.argv[3]
-print(input_file_name)
-print(output_file_name)
+#print(input_file_name)
+#print(output_file_name)
 
 with open(input_file_name, "r") as input_file, open(output_file_name, "w") as output_file: 
     asm_source = input_file.readlines()
-    print(asm_source)
+    #print(asm_source)
     assembeler = HP1000Assembler()
     assembeler.pass_one(asm_source)
     results = assembeler.pass_two(asm_source)
-    print(results)
+    #print(results)
     output_file.writelines(f"{'LOC':<6} | {'OCTAL':<6} | {'SOURCE'}" + "\n")
     output_file.writelines("-" * 45 + "\n")
     for loc, code, src in results:
@@ -280,5 +301,4 @@ with open(input_file_name, "r") as input_file, open(output_file_name, "w") as ou
     
 input_file.close()
 output_file.close()
-
 
